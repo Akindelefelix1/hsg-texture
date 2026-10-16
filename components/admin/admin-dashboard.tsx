@@ -578,18 +578,30 @@ export function AdminDashboard() {
         );
         if (!name || !category?.id || !Number.isFinite(price) || price <= 0)
           return;
+        const uploadedKeys: string[] = [];
         try {
           const { apiUrl, token } = await getAdminRequestContext();
           const orderedDrafts = [...mediaDrafts].sort((a, b) =>
             a.id === coverMediaId ? -1 : b.id === coverMediaId ? 1 : 0,
           );
-          const orderedMedia = await Promise.all(
-            orderedDrafts.map(async (media) =>
-              media.file
-                ? uploadAdminProductMedia(apiUrl, token, media.file, name)
-                : media,
-            ),
-          );
+          // Keep uploads ordered and stop before the product mutation when a
+          // file cannot be stored. This avoids racing the storage service and
+          // prevents creating a product with a partially uploaded gallery.
+          const orderedMedia: ProductMedia[] = [];
+          for (const media of orderedDrafts) {
+            if (media.file) {
+              const uploaded = await uploadAdminProductMedia(
+                apiUrl,
+                token,
+                media.file,
+                name,
+              );
+              uploadedKeys.push(uploaded.key ?? uploaded.id);
+              orderedMedia.push(uploaded);
+            } else {
+              orderedMedia.push(media);
+            }
+          }
           const input = {
             name,
             price,
@@ -628,6 +640,20 @@ export function AdminDashboard() {
               : "Product created successfully.",
           );
         } catch (cause) {
+          // Do not leave orphaned objects behind when the later product
+          // mutation fails after one or more uploads have succeeded.
+          if (uploadedKeys.length) {
+            try {
+              const { apiUrl, token } = await getAdminRequestContext();
+              await Promise.all(
+                uploadedKeys.map((key) =>
+                  deleteAdminProductMedia(apiUrl, token, key),
+                ),
+              );
+            } catch {
+              // Preserve the original product error for the admin.
+            }
+          }
           setMediaError(
             cause instanceof Error
               ? cause.message

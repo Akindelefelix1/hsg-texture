@@ -469,31 +469,17 @@ export async function uploadAdminProductMedia(
       .replace(/^-|-$/g, "") || "product";
   const safeName = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
   const key = `products/${slug}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
-  const signed = await ensureOk(
-    await fetch(`${baseUrl}/api/v1/storage/upload-url`, {
+  const form = new FormData();
+  form.append("key", key);
+  form.append("file", file, file.name);
+  const uploaded = await ensureOk(
+    await fetch(`${baseUrl}/api/v1/storage/upload`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ key, contentType: file.type }),
-    }),
-  );
-  const { url } = (await signed.json()) as { url: string };
-  await ensureOk(
-    await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": file.type },
-      body: file,
-    }),
-  );
-  const path = key.split("/").map(encodeURIComponent).join("/");
-  const read = await ensureOk(
-    await fetch(`${baseUrl}/api/v1/storage/read-url/${path}`, {
       headers: { Authorization: `Bearer ${token}` },
+      body: form,
     }),
   );
-  const { url: returnedUrl } = (await read.json()) as { url: string };
+  const { url: returnedUrl } = (await uploaded.json()) as { url: string };
   const publicUrl = normalizeMediaUrl(returnedUrl, key);
   return {
     id: key,
